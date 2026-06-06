@@ -1,91 +1,114 @@
-import type { WebSocket } from "ws";
+import type { Session } from "./session.js";
 
 /**
- * Tracks room membership and provides broadcast helpers.
+ * Tracks room membership at the **session** level (not the socket level)
+ * and provides presence helpers.
  *
- * A room is an arbitrary string key. Each socket may belong to any
- * number of rooms. Membership is stored bidirectionally so that
- * disconnects can be cleaned up in O(rooms-per-socket) time.
+ * Membership is keyed by {@link Session} so that a client which drops and
+ * later resumes stays subscribed to its rooms while it is offline. This
+ * is what makes the resume/replay flow work: broadcasts can still be
+ * buffered onto a disconnected member's session.
+ *
+ * Each session may belong to any number of rooms. Membership is stored
+ * bidirectionally so disconnects/evictions clean up in
+ * O(rooms-per-session) time.
  */
 export class RoomManager {
-  /** room name -> set of member sockets */
-  private readonly rooms = new Map<string, Set<WebSocket>>();
-  /** socket -> set of rooms it belongs to */
-  private readonly membership = new Map<WebSocket, Set<string>>();
+  /** room name -> set of member sessions */
+  private readonly rooms = new Map<string, Set<Session>>();
+  /** session -> set of rooms it belongs to */
+  private readonly membership = new Map<Session, Set<string>>();
 
   /**
-   * Add `socket` to `room`. Returns `true` if the socket was newly
-   * added, `false` if it was already a member.
+   * Add `session` to `room`. Returns `true` if newly added, `false` if
+   * it was already a member.
    */
-  join(room: string, socket: WebSocket): boolean {
+  join(room: string, session: Session): boolean {
     let members = this.rooms.get(room);
     if (!members) {
       members = new Set();
       this.rooms.set(room, members);
     }
-    let joined = this.membership.get(socket);
+    let joined = this.membership.get(session);
     if (!joined) {
       joined = new Set();
-      this.membership.set(socket, joined);
+      this.membership.set(session, joined);
     }
-    if (members.has(socket)) {
+    if (members.has(session)) {
       return false;
     }
-    members.add(socket);
+    members.add(session);
     joined.add(room);
     return true;
   }
 
   /**
-   * Remove `socket` from `room`. Returns `true` if the socket was a
-   * member and was removed, `false` otherwise.
+   * Remove `session` from `room`. Returns `true` if it was a member and
+   * was removed, `false` otherwise.
    */
-  leave(room: string, socket: WebSocket): boolean {
+  leave(room: string, session: Session): boolean {
     const members = this.rooms.get(room);
-    if (!members || !members.has(socket)) {
+    if (!members || !members.has(session)) {
       return false;
     }
-    members.delete(socket);
+    members.delete(session);
     if (members.size === 0) {
       this.rooms.delete(room);
     }
-    const joined = this.membership.get(socket);
+    const joined = this.membership.get(session);
     if (joined) {
       joined.delete(room);
       if (joined.size === 0) {
-        this.membership.delete(socket);
+        this.membership.delete(session);
       }
     }
     return true;
   }
 
-  /** Remove `socket` from every room it belongs to (e.g. on disconnect). */
-  leaveAll(socket: WebSocket): void {
-    const joined = this.membership.get(socket);
+  /** Remove `session` from every room it belongs to (e.g. on eviction). */
+  leaveAll(session: Session): void {
+    const joined = this.membership.get(session);
     if (!joined) {
       return;
     }
     for (const room of joined) {
       const members = this.rooms.get(room);
       if (members) {
-        members.delete(socket);
+        members.delete(session);
         if (members.size === 0) {
           this.rooms.delete(room);
         }
       }
     }
-    this.membership.delete(socket);
+    this.membership.delete(session);
   }
 
-  /** Return the current members of `room` (empty array if none). */
-  members(room: string): WebSocket[] {
+  /** Return the current member sessions of `room` (empty array if none). */
+  members(room: string): Session[] {
     const members = this.rooms.get(room);
     return members ? [...members] : [];
   }
 
-  /** Return the rooms `socket` currently belongs to. */
-  roomsOf(socket: WebSocket): string[] {
-    const joined = this.membership.get(socket);
+  /**
+   * Return the presence roster for `room`: the sorted, de-duplicated list
+   * of member principals. Sessions without a principal (unauthenticated)
+   * are reported as `"anonymous"`.
+   */
+  presence(room: string): string[] {
+    const members = this.rooms.get(room);
+    if (!members) {
+      return [];
+    }
+    const labels = new Set<string>();
+    for (const session of members) {
+      labels.add(session.principal ?? "anonymous");
+    }
+    return [...labels].sort();
+  }
+
+  /** Return the rooms `session` currently belongs to. */
+  roomsOf(session: Session): string[] {
+    const joined = this.membership.get(session);
     return joined ? [...joined] : [];
   }
 

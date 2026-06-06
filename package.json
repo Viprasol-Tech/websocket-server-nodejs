@@ -1,7 +1,7 @@
 {
   "name": "websocket-server-nodejs",
-  "version": "0.1.0",
-  "description": "WebSocket server in Node/TypeScript with rooms and a typed JSON message protocol.",
+  "version": "0.2.0",
+  "description": "Production-grade WebSocket server in Node/TypeScript: rooms, auth handshake, heartbeats, presence, per-connection rate limiting, RPC, and reconnect/resume.",
   "type": "module",
   "license": "MIT",
   "author": "Viprasol Tech Private Limited",
@@ -22,7 +22,14 @@
     "realtime",
     "ws",
     "server",
-    "backend"
+    "backend",
+    "rpc",
+    "presence",
+    "heartbeat",
+    "rate-limit",
+    "rooms",
+    "reconnect",
+    "pubsub"
   ],
   "scripts": {
     "build": "tsc",
